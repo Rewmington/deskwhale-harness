@@ -299,6 +299,10 @@ function registerIpc(options: PetWindowOptions): void {
     ])
     menu.popup({ window: petWindow })
   })
+  ipcMain.on('pet:set-interactive', (_event, interactive: boolean) => {
+    if (petWindow === null || petWindow.isDestroyed()) return
+    petWindow.setIgnoreMouseEvents(!interactive, { forward: true })
+  })
 }
 
 function unregisterIpc(): void {
@@ -307,6 +311,7 @@ function unregisterIpc(): void {
   ipcMain.removeAllListeners('pet:drag-start')
   ipcMain.removeAllListeners('pet:drag-end')
   ipcMain.removeAllListeners('pet:context-menu')
+  ipcMain.removeAllListeners('pet:set-interactive')
 }
 
 /**
@@ -349,6 +354,7 @@ export function createPetWindow(host: DshHost, options: PetWindowOptions): PetHa
   const loaded = loadPosition() ?? defaultPosition()
   const pos = clampToVisible(loaded, loaded)
   win.setPosition(pos.x, pos.y)
+  win.setIgnoreMouseEvents(true, { forward: true })
   void win.loadFile(join(__dirname, '../assets/pet/pet.html'))
   win.once('ready-to-show', () => {
     win.showInactive()

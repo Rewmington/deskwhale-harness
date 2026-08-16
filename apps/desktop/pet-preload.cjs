@@ -33,4 +33,8 @@ contextBridge.exposeInMainWorld('pet', {
   contextMenu() {
     ipcRenderer.send('pet:context-menu')
   },
+  // Toggle whether the window intercepts mouse events (click-through).
+  setInteractive(interactive) {
+    ipcRenderer.send('pet:set-interactive', interactive)
+  },
 })

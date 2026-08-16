@@ -149,9 +149,19 @@
       dragging: 'dragging.png',
       work: ['work1.png', 'work2.png'],
     }
-    // Warm the cache so status flips never wait on a cold file:// read.
+    // Warm the cache so status flips never wait on a cold file:// read, and
+    // keep an alpha copy per sprite for precise click-through hit testing.
+    const hitCanvases = new Map()
     for (const src of [...SPRITES.work, SPRITES.idle, SPRITES.approval, SPRITES.dragging]) {
       const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        ctx.drawImage(img, 0, 0)
+        hitCanvases.set(img.src, canvas)
+      }
       img.src = src
     }
     let workFrame = 0
@@ -160,6 +170,36 @@
     function showSprite(src) {
       if (petImg.src.endsWith(src)) return
       petImg.src = src
+    }
+    function isSolidPetPixel(clientX, clientY) {
+      const rect = petImg.getBoundingClientRect()
+      const x = clientX - rect.left
+      const y = clientY - rect.top
+      if (x < 0 || y < 0 || x >= rect.width || y >= rect.height) return false
+      const canvas = hitCanvases.get(petImg.currentSrc)
+      if (canvas === undefined) return true
+      try {
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        const sx = Math.min(canvas.width - 1, Math.floor(x * canvas.width / rect.width))
+        const sy = Math.min(canvas.height - 1, Math.floor(y * canvas.height / rect.height))
+        return (ctx.getImageData(sx, sy, 1, 1).data[3] ?? 0) > 8
+      } catch {
+        return true
+      }
+    }
+    function shouldInteract(clientX, clientY) {
+      if (dragging) return true
+      const el = document.elementFromPoint(clientX, clientY)
+      if (el !== null && el.closest('.handle') !== null) return true
+      if (el !== null && el.closest('.pet-stage') !== null) return isSolidPetPixel(clientX, clientY)
+      return false
+    }
+    let interactive = false
+    function updateInteractive(event) {
+      const next = shouldInteract(event.clientX, event.clientY)
+      if (next === interactive) return
+      interactive = next
+      window.pet.setInteractive(next)
     }
     // Cycle the two working poses every 10s while a task is running. Guarded so
     // running<->tool flips (which can be frequent) don't reset the clock.
@@ -247,6 +287,8 @@
       handleEl.classList.toggle('hidden', state.status !== 'approval')
     })
 
+    document.addEventListener('mousemove', updateInteractive)
+
     // Grab the pet to drag it; right-click pops the context menu; double-click
     // surfaces the main window. Movement is driven by the main process polling
     // the OS cursor (never window-derived coordinates), so it cannot drift.
@@ -259,19 +301,21 @@
       showSprite(SPRITES.dragging)
       window.pet.dragStart()
     })
-    document.addEventListener('pointerup', () => {
+    document.addEventListener('pointerup', (e) => {
       if (!dragging) return
       dragging = false
       document.body.classList.remove('dragging')
       applyStatusSprite(document.body.dataset.state)
       window.pet.dragEnd()
+      updateInteractive(e)
     })
-    document.addEventListener('pointercancel', () => {
+    document.addEventListener('pointercancel', (e) => {
       if (!dragging) return
       dragging = false
       document.body.classList.remove('dragging')
       applyStatusSprite(document.body.dataset.state)
       window.pet.dragEnd()
+      updateInteractive(e)
     })
     stageEl.addEventListener('dblclick', () => window.pet.openMain())
     stageEl.addEventListener('contextmenu', (e) => {
