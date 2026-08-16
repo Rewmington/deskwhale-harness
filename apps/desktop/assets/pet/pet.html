@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DeepSeek Harness 桌宠</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 8px;
+  }
+
+  /* speech bubble for the current status */
+  .bubble {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    height: 64px; min-width: 128px; max-width: 190px;
+    padding: 10px 22px 18px;
+    font-size: 13px; line-height: 1.3; color: #2b2b3a;
+    background: url('bubble.png') center / 100% 100% no-repeat;
+    filter: drop-shadow(0 3px 10px rgba(30, 45, 140, 0.22));
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    opacity: 0; transform: translateY(4px) scale(0.9);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+  .bubble.show { opacity: 1; transform: translateY(0) scale(1); }
+  body[data-state="approval"] .bubble {
+    color: #c0392b;
+    filter: drop-shadow(0 3px 10px rgba(255, 107, 107, 0.3));
+  }
+
+  /* the pet itself — silhouette only, no box */
+  .pet-stage {
+    position: relative; flex: none;
+    width: 190px; height: 280px;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: none;
+  }
+  .pet-img {
+    position: relative; z-index: 1;
+    height: 100%; width: auto; max-width: 100%;
+    object-fit: contain;
+    -webkit-user-drag: none;
+    filter: drop-shadow(0 2px 6px rgba(30, 45, 140, 0.25)) drop-shadow(0 0 10px var(--glow));
+  }
+  .approval-badge {
+    position: absolute; z-index: 2; top: 2px; right: 4px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #ff6b6b; color: #fff;
+    font-size: 15px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(255, 107, 107, 0.5);
+    opacity: 0; transform: scale(0);
+  }
+  .tool-dots {
+    position: absolute; z-index: 2; bottom: 4px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px;
+  }
+  .tool-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--glow-solid, #4d6bfe); }
+
+  /* state-colored glow, following the pet silhouette */
+  :root { --glow: rgba(125, 154, 255, 0.55); --glow-solid: #8aa3ff; }
+  body[data-state="running"]  { --glow: rgba(77, 107, 254, 0.8); --glow-solid: #4d6bfe; }
+  body[data-state="tool"]     { --glow: rgba(47, 212, 160, 0.7); --glow-solid: #2fd4a0; }
+  body[data-state="approval"] { --glow: rgba(255, 107, 107, 0.8); --glow-solid: #ff6b6b; }
+
+  @keyframes idle-float {
+    0%, 100% { transform: translateY(0) rotate(-2deg); }
+    50% { transform: translateY(-6px) rotate(2deg); }
+  }
+  @keyframes busy {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    30% { transform: translateY(-7px) rotate(-2deg); }
+    70% { transform: translateY(-2px) rotate(2deg); }
+  }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-3px); } 40% { transform: translateX(3px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
+  @keyframes glow-pulse {
+    0%, 100% { filter: drop-shadow(0 2px 6px rgba(30, 45, 140, 0.25)) drop-shadow(0 0 6px var(--glow)); }
+    50% { filter: drop-shadow(0 2px 6px rgba(30, 45, 140, 0.25)) drop-shadow(0 0 16px var(--glow)); }
+  }
+  @keyframes pop { 0% { transform: scale(0); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }
+  @keyframes blinkdot { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+  body[data-state="idle"] .pet-stage { animation: idle-float 5s ease-in-out infinite; }
+  body[data-state="running"] .pet-stage,
+  body[data-state="tool"] .pet-stage { animation: busy 0.8s ease-in-out infinite; }
+  body[data-state="running"] .pet-img { animation: glow-pulse 1s ease-in-out infinite; }
+  /* running/tool share the same stage animation; only the glow effect changes. */
+  body[data-state="tool"] .pet-img { animation: glow-pulse 1.4s ease-in-out infinite; }
+  body[data-state="tool"] .tool-dots { opacity: 1; }
+  body[data-state="tool"] .tool-dots i:nth-child(1) { animation: blinkdot 1s ease-in-out infinite; }
+  body[data-state="tool"] .tool-dots i:nth-child(2) { animation: blinkdot 1s ease-in-out 0.22s infinite; }
+  body[data-state="tool"] .tool-dots i:nth-child(3) { animation: blinkdot 1s ease-in-out 0.44s infinite; }
+  body[data-state="approval"] .pet-stage { animation: shake 0.5s ease-in-out infinite; }
+  body[data-state="approval"] .pet-img { animation: glow-pulse 0.7s ease-in-out infinite; }
+  body[data-state="approval"] .approval-badge { opacity: 1; animation: pop 0.4s ease; }
+
+  /* While dragging, drop every per-frame visual cost: a transparent always-on-top
+     window repaints on each move, and drop-shadow + animations make that brutal. */
+  body.dragging .pet-img { filter: none !important; animation: none !important; }
+  body.dragging .pet-stage { animation: none !important; }
+  body.dragging .bubble { display: none; }
+  body.dragging .approval-badge, body.dragging .tool-dots { opacity: 0 !important; }
+
+  .actions { flex: none; min-height: 30px; display: flex; align-items: center; }
+  .handle {
+    font-size: 13px; padding: 5px 16px; border-radius: 999px;
+    border: none; background: #4d6bfe; color: #fff; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(77, 107, 254, 0.4);
+    transition: transform 0.12s ease, opacity 0.18s ease;
+  }
+  .handle:hover { transform: translateY(-1px); }
+  .handle.hidden { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body data-state="idle">
+  <div class="bubble" id="bubble"></div>
+  <div class="pet-stage" id="stage">
+    <img class="pet-img" id="petImg" src="idle.png" alt="DeepSeek" draggable="false">
+    <span class="approval-badge">?</span>
+    <span class="tool-dots"><i></i><i></i><i></i></span>
+  </div>
+  <div class="actions">
+    <button class="handle hidden" id="handle" title="在主窗口处理该审批">去处理</button>
+  </div>
+  <script>
+    const TOOL_LABELS = { bash: '命令', pwsh: 'PowerShell', fs: '文件', code: '代码', skill: '技能' }
+    const toolLabel = (name) => TOOL_LABELS[name] || name
+
+    const bubbleEl = document.getElementById('bubble')
+    const handleEl = document.getElementById('handle')
+    const stageEl = document.getElementById('stage')
+    const petImg = document.getElementById('petImg')
+
+    // Per-status pet sprite. working states alternate between two poses so the
+    // pet reads as "busy" without needing per-frame animation cost.
+    const SPRITES = {
+      idle: 'idle.png',
+      approval: 'approval.png',
+      dragging: 'dragging.png',
+      work: ['work1.png', 'work2.png'],
+    }
+    // Warm the cache so status flips never wait on a cold file:// read.
+    for (const src of [...SPRITES.work, SPRITES.idle, SPRITES.approval, SPRITES.dragging]) {
+      const img = new Image()
+      img.src = src
+    }
+    let workFrame = 0
+    let workTimer = null
+    let dragging = false
+    function showSprite(src) {
+      if (petImg.src.endsWith(src)) return
+      petImg.src = src
+    }
+    // Cycle the two working poses every 10s while a task is running. Guarded so
+    // running<->tool flips (which can be frequent) don't reset the clock.
+    function startWorkCycle() {
+      if (workTimer !== null) return
+      showSprite(SPRITES.work[workFrame])
+      workTimer = setInterval(() => {
+        workFrame = (workFrame + 1) % SPRITES.work.length
+        showSprite(SPRITES.work[workFrame])
+      }, 10000)
+    }
+    function stopWorkCycle() {
+      if (workTimer !== null) {
+        clearInterval(workTimer)
+        workTimer = null
+      }
+    }
+    function applyStatusSprite(status) {
+      // Keep the dragging pose while the pointer is held; the release handler
+      // re-applies the status sprite.
+      if (dragging) return
+      if (status === 'idle') {
+        stopWorkCycle()
+        showSprite(SPRITES.idle)
+      } else if (status === 'approval') {
+        stopWorkCycle()
+        showSprite(SPRITES.approval)
+      } else {
+        // running / tool: both mean "busy working" — swap the two poses.
+        startWorkCycle()
+      }
+    }
+
+    const TEXT = {
+      running: (s) => (s.runningCount > 1 ? `工作中 ×${s.runningCount}` : '工作中'),
+      tool: (s) => `执行 ${toolLabel(s.toolName)}…`,
+      approval: (s) => s.kind === 'question' ? '等待你回答' : '等待你批准',
+    }
+
+    // Goofy idle lines — the pet talks to you while nothing is running.
+    const IDLE_PHRASES = [
+      '空闲中…摸个鱼',
+      '发呆中…',
+      '等你下命令',
+      '蹲在旁边偷看',
+      '偷看你屏幕',
+      '今天也是摸鱼的一天',
+      '打个盹…zzZ',
+      '假装很忙',
+      '滚来滚去…',
+      '喂？有事快说',
+      '……',
+    ]
+    let idleTimer = null
+    let lastIdle = -1
+    function randomIdle() {
+      let index = Math.floor(Math.random() * IDLE_PHRASES.length)
+      if (index === lastIdle) index = (index + 1) % IDLE_PHRASES.length
+      lastIdle = index
+      return IDLE_PHRASES[index]
+    }
+    function clearIdle() {
+      if (idleTimer !== null) {
+        clearInterval(idleTimer)
+        idleTimer = null
+      }
+    }
+
+    window.pet.onState((state) => {
+      document.body.dataset.state = state.status
+      clearIdle()
+      applyStatusSprite(state.status)
+      let text = ''
+      if (state.status === 'idle') {
+        text = randomIdle()
+        // Rotate the idle line every few seconds so the pet feels alive.
+        idleTimer = setInterval(() => {
+          bubbleEl.textContent = randomIdle()
+        }, 8000)
+      } else {
+        text = TEXT[state.status] ? TEXT[state.status](state) : ''
+      }
+      bubbleEl.textContent = text
+      bubbleEl.classList.toggle('show', text !== '')
+      handleEl.classList.toggle('hidden', state.status !== 'approval')
+    })
+
+    // Grab the pet to drag it; right-click pops the context menu; double-click
+    // surfaces the main window. Movement is driven by the main process polling
+    // the OS cursor (never window-derived coordinates), so it cannot drift.
+    stageEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      dragging = true
+      stageEl.setPointerCapture(e.pointerId)
+      document.body.classList.add('dragging')
+      stopWorkCycle()
+      showSprite(SPRITES.dragging)
+      window.pet.dragStart()
+    })
+    document.addEventListener('pointerup', () => {
+      if (!dragging) return
+      dragging = false
+      document.body.classList.remove('dragging')
+      applyStatusSprite(document.body.dataset.state)
+      window.pet.dragEnd()
+    })
+    document.addEventListener('pointercancel', () => {
+      if (!dragging) return
+      dragging = false
+      document.body.classList.remove('dragging')
+      applyStatusSprite(document.body.dataset.state)
+      window.pet.dragEnd()
+    })
+    stageEl.addEventListener('dblclick', () => window.pet.openMain())
+    stageEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      window.pet.contextMenu()
+    })
+    handleEl.addEventListener('click', () => window.pet.handleApproval())
+  </script>
+</body>
+</html>

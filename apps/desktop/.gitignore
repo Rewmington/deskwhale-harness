@@ -1,0 +1,5 @@
+# Electron shell build artifacts
+node_modules/
+lib/
+release/
+.deploy/
