@@ -6,6 +6,7 @@
 import { Tray, Menu, nativeImage, type BrowserWindow } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PET_STYLE_OPTIONS, type PetStyle } from './pet.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -16,15 +17,18 @@ export interface TrayHandle {
 
 /**
  * Create the tray. Clicking the icon shows the window; the context menu has
- * "显示主窗口", a "桌宠" enable/disable switch and "退出". `onQuit` must request
- * a real quit (not hide). The pet switch calls `togglePet` with the target
- * state and keeps its checkbox in sync with `getPetEnabled`.
+ * "显示主窗口", a "桌宠" enable/disable switch, a pet-style selector, and "退出".
+ * `onQuit` must request a real quit (not hide). The pet switch calls
+ * `togglePet` with the target state and keeps its checkbox in sync with
+ * `getPetEnabled`.
  */
 export function createTray(
   getWindow: () => BrowserWindow | null,
   onQuit: () => void,
   togglePet: (enabled: boolean) => void,
   getPetEnabled: () => boolean,
+  getPetStyle: () => PetStyle,
+  selectPetStyle: (style: PetStyle) => void,
 ): TrayHandle {
   const icon = nativeImage.createFromPath(join(__dirname, '../assets/icon.png'))
   const tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
@@ -47,6 +51,18 @@ export function createTray(
           togglePet(!getPetEnabled())
           refreshMenu()
         },
+      },
+      {
+        label: '宠物风格',
+        submenu: PET_STYLE_OPTIONS.map(({ id, label }) => ({
+          type: 'radio' as const,
+          label,
+          checked: getPetStyle() === id,
+          click: () => {
+            selectPetStyle(id)
+            refreshMenu()
+          },
+        })),
       },
       { type: 'separator' },
       { label: '退出', click: onQuit },

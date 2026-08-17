@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('pet', {
     ipcRenderer.on('pet:state', listener)
     return () => ipcRenderer.removeListener('pet:state', listener)
   },
+  // Subscribe to an immediate outfit change for the current pet pose.
+  onStyle(callback) {
+    const listener = (_event, style) => callback(style)
+    ipcRenderer.on('pet:style', listener)
+    return () => ipcRenderer.removeListener('pet:style', listener)
+  },
   // Surface the main window.
   openMain() {
     ipcRenderer.send('pet:open-main')

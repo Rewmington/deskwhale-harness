@@ -122,7 +122,7 @@
   .handle.hidden { opacity: 0; pointer-events: none; }
 </style>
 </head>
-<body data-state="idle">
+<body data-state="idle" data-style="classic">
   <div class="bubble" id="bubble"></div>
   <div class="pet-stage" id="stage">
     <img class="pet-img" id="petImg" src="idle.png" alt="DeepSeek" draggable="false">
@@ -144,25 +144,38 @@
     // Per-status pet sprite. working states alternate between two poses so the
     // pet reads as "busy" without needing per-frame animation cost.
     const SPRITES = {
-      idle: 'idle.png',
-      approval: 'approval.png',
-      dragging: 'dragging.png',
-      work: ['work1.png', 'work2.png'],
+      classic: {
+        idle: 'idle.png',
+        approval: 'approval.png',
+        dragging: 'dragging.png',
+        work: ['work1.png', 'work2.png'],
+      },
+      'black-white-maid': {
+        idle: 'black-white-maid/final-idle.png',
+        approval: 'black-white-maid/final-approval.png',
+        dragging: 'black-white-maid/final-dragging.png',
+        work: ['black-white-maid/final-work1.png', 'black-white-maid/final-work2.png'],
+      },
+    }
+    function currentSprites() {
+      return document.body.dataset.style === 'black-white-maid' ? SPRITES['black-white-maid'] : SPRITES.classic
     }
     // Warm the cache so status flips never wait on a cold file:// read, and
     // keep an alpha copy per sprite for precise click-through hit testing.
     const hitCanvases = new Map()
-    for (const src of [...SPRITES.work, SPRITES.idle, SPRITES.approval, SPRITES.dragging]) {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        ctx.drawImage(img, 0, 0)
-        hitCanvases.set(img.src, canvas)
+    for (const sprites of Object.values(SPRITES)) {
+      for (const src of [...sprites.work, sprites.idle, sprites.approval, sprites.dragging]) {
+        const img = new Image()
+        img.onload = () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })
+          ctx.drawImage(img, 0, 0)
+          hitCanvases.set(img.src, canvas)
+        }
+        img.src = src
       }
-      img.src = src
     }
     let workFrame = 0
     let workTimer = null
@@ -204,11 +217,11 @@
     // Cycle the two working poses every 10s while a task is running. Guarded so
     // running<->tool flips (which can be frequent) don't reset the clock.
     function startWorkCycle() {
+      showSprite(currentSprites().work[workFrame])
       if (workTimer !== null) return
-      showSprite(SPRITES.work[workFrame])
       workTimer = setInterval(() => {
-        workFrame = (workFrame + 1) % SPRITES.work.length
-        showSprite(SPRITES.work[workFrame])
+        workFrame = (workFrame + 1) % currentSprites().work.length
+        showSprite(currentSprites().work[workFrame])
       }, 10000)
     }
     function stopWorkCycle() {
@@ -223,10 +236,10 @@
       if (dragging) return
       if (status === 'idle') {
         stopWorkCycle()
-        showSprite(SPRITES.idle)
+        showSprite(currentSprites().idle)
       } else if (status === 'approval') {
         stopWorkCycle()
-        showSprite(SPRITES.approval)
+        showSprite(currentSprites().approval)
       } else {
         // running / tool: both mean "busy working" — swap the two poses.
         startWorkCycle()
@@ -270,6 +283,7 @@
 
     window.pet.onState((state) => {
       document.body.dataset.state = state.status
+      document.body.dataset.style = state.style
       clearIdle()
       applyStatusSprite(state.status)
       let text = ''
@@ -287,6 +301,11 @@
       handleEl.classList.toggle('hidden', state.status !== 'approval')
     })
 
+    window.pet.onStyle((style) => {
+      document.body.dataset.style = style
+      applyStatusSprite(document.body.dataset.state)
+    })
+
     document.addEventListener('mousemove', updateInteractive)
 
     // Grab the pet to drag it; right-click pops the context menu; double-click
@@ -298,7 +317,7 @@
       stageEl.setPointerCapture(e.pointerId)
       document.body.classList.add('dragging')
       stopWorkCycle()
-      showSprite(SPRITES.dragging)
+      showSprite(currentSprites().dragging)
       window.pet.dragStart()
     })
     document.addEventListener('pointerup', (e) => {

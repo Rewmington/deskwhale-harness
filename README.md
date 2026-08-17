@@ -8,6 +8,8 @@ DeskWhale (鲸灵) is a community fork of [DeepSeek Harness](https://github.com/
 
 ![Pet preview](assets/pet-preview.png)
 
+![Black-and-white maid outfit pet style](assets/black-white-maid-preview.png)
+
 ## Added features
 
 - Desktop pet: a transparent, always-on-top whale that mirrors the dsh task status in real time
@@ -16,6 +18,7 @@ DeskWhale (鲸灵) is a community fork of [DeepSeek Harness](https://github.com/
 - Frosted glass window: frameless main window with Windows 11 Acrylic material
 - Startup splash: immediate feedback during cold start so the app never looks frozen
 - Pet toggle: switch the pet on or off from the title bar, synced with the tray menu
+- Pet style: choose the classic maid outfit or a mature black-and-white maid outfit from the pet or tray menu
 - Draggable pet with a right-click menu; double-click opens the main window
 
 ## Run

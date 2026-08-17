@@ -41,22 +41,43 @@ const EDGE_MARGIN = 20
 
 /** What the pet tells its page right now. */
 export type PetState =
-  | { status: 'idle' }
-  | { status: 'running'; runningCount: number }
-  | { status: 'tool'; toolName: string; runningCount: number }
-  | {
-    status: 'approval'
-    kind?: 'approval' | 'question' | undefined
-    toolName?: string | undefined
-    reason?: string | undefined
-    runningCount: number
-  }
+  { style: PetStyle } & (
+    | { status: 'idle' }
+    | { status: 'running'; runningCount: number }
+    | { status: 'tool'; toolName: string; runningCount: number }
+    | {
+      status: 'approval'
+      kind?: 'approval' | 'question' | undefined
+      toolName?: string | undefined
+      reason?: string | undefined
+      runningCount: number
+    }
+  )
+
+/** Desktop-pet outfits exposed by the native menus and persisted in user settings. */
+export const PET_STYLE_OPTIONS = [
+  { id: 'classic', label: '经典女仆装' },
+  { id: 'black-white-maid', label: '黑白女仆装' },
+] as const
+
+/** Persisted rendering styles for the desktop pet. */
+export type PetStyle = typeof PET_STYLE_OPTIONS[number]['id']
+
+const DEFAULT_PET_STYLE: PetStyle = 'classic'
+
+function isPetStyle(value: unknown): value is PetStyle {
+  return PET_STYLE_OPTIONS.some(({ id }) => value === id)
+}
 
 export interface PetHandle {
   /** Show the pet window (without stealing focus). */
   show(): void
   /** Hide the pet window; subscriptions stay alive so show() is instant. */
   hide(): void
+  /** Re-send the current pet preferences to the renderer. */
+  refresh(): void
+  /** Immediately render an outfit for the renderer's current status pose. */
+  setStyle(style: PetStyle): void
   /** Destroy the window, its IPC handlers and its event subscriptions. */
   destroy(): void
 }
@@ -67,6 +88,10 @@ interface PetWindowOptions {
   onQuit: () => void
   /** Enable/disable the pet (used by the pet's context menu). */
   togglePet: (enabled: boolean) => void
+  /** Persist and apply a style selected from the pet's context menu. */
+  selectPetStyle: (style: PetStyle) => void
+  /** Return the current persisted pet style for native menu state. */
+  getPetStyle: () => PetStyle
 }
 
 interface PendingApproval {
@@ -104,24 +129,51 @@ function settingsFile(): string {
   return join(app.getPath('userData'), 'pet-settings.json')
 }
 
+interface PetSettings {
+  enabled?: boolean
+  style?: PetStyle
+}
+
+function loadPetSettings(): PetSettings {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(settingsFile(), 'utf8'))
+    if (parsed === null || typeof parsed !== 'object') return {}
+    const { enabled, style } = parsed as { enabled?: unknown; style?: unknown }
+    return {
+      ...typeof enabled === 'boolean' ? { enabled } : {},
+      ...isPetStyle(style) ? { style } : {},
+    }
+  } catch {
+    return {}
+  }
+}
+
+function savePetSettings(settings: PetSettings): void {
+  try {
+    writeFileSync(settingsFile(), JSON.stringify(settings))
+  } catch {
+    // Best-effort; a failure must not affect the app.
+  }
+}
+
 /** Whether the pet is enabled, persisted across runs. Defaults to on. */
 export function isPetEnabled(): boolean {
-  try {
-    const parsed = JSON.parse(readFileSync(settingsFile(), 'utf8')) as { enabled?: boolean }
-    return parsed.enabled !== false
-  } catch {
-    // Missing or corrupt settings file: default to enabled.
-    return true
-  }
+  return loadPetSettings().enabled !== false
 }
 
 /** Persist the pet's enabled state. */
 export function setPetEnabled(enabled: boolean): void {
-  try {
-    writeFileSync(settingsFile(), JSON.stringify({ enabled }))
-  } catch {
-    // Best-effort; a failure must not affect the app.
-  }
+  savePetSettings({ ...loadPetSettings(), enabled })
+}
+
+/** Return the saved pet style, defaulting to the original full-color art. */
+export function getPetStyle(): PetStyle {
+  return loadPetSettings().style ?? DEFAULT_PET_STYLE
+}
+
+/** Persist the pet style selected from a native desktop menu. */
+export function setPetStyle(style: PetStyle): void {
+  savePetSettings({ ...loadPetSettings(), style })
 }
 
 function loadPosition(): { x: number; y: number } | null {
@@ -175,10 +227,12 @@ function runningCount(): number {
 function recompute(): void {
   if (petWindow === null || petWindow.isDestroyed()) return
   const count = runningCount()
+  const preferences = { style: getPetStyle() }
 
-  const firstPending = pending.values().next().value as PendingApproval | undefined
+  const firstPending = pending.values().next().value
   if (firstPending !== undefined) {
     petWindow.webContents.send('pet:state', {
+      ...preferences,
       status: 'approval',
       kind: 'approval',
       toolName: firstPending.toolName,
@@ -189,6 +243,7 @@ function recompute(): void {
   }
   if (pendingQuestions.size > 0) {
     petWindow.webContents.send('pet:state', {
+      ...preferences,
       status: 'approval',
       kind: 'question',
       toolName: 'ask_user_question',
@@ -203,11 +258,12 @@ function recompute(): void {
     if (entry.running) runningAgent = entry
   }
   if (runningAgent === undefined) {
-    petWindow.webContents.send('pet:state', { status: 'idle' } satisfies PetState)
+    petWindow.webContents.send('pet:state', { ...preferences, status: 'idle' } satisfies PetState)
     return
   }
   if (runningAgent.lastTool !== undefined) {
     petWindow.webContents.send('pet:state', {
+      ...preferences,
       status: 'tool',
       toolName: runningAgent.lastTool,
       runningCount: count,
@@ -215,6 +271,7 @@ function recompute(): void {
     return
   }
   petWindow.webContents.send('pet:state', {
+    ...preferences,
     status: 'running',
     runningCount: count,
   } satisfies PetState)
@@ -292,7 +349,20 @@ function registerIpc(options: PetWindowOptions): void {
         type: 'checkbox',
         label: '桌宠',
         checked: isPetEnabled(),
-        click: () => options.togglePet(!isPetEnabled()),
+        click: () => {
+          options.togglePet(!isPetEnabled())
+        },
+      },
+      {
+        label: '宠物风格',
+        submenu: PET_STYLE_OPTIONS.map(({ id, label }) => ({
+          type: 'radio' as const,
+          label,
+          checked: options.getPetStyle() === id,
+          click: () => {
+            options.selectPetStyle(id)
+          },
+        })),
       },
       { type: 'separator' },
       { label: '退出', click: options.onQuit },
@@ -393,8 +463,7 @@ export function createPetWindow(host: DshHost, options: PetWindowOptions): PetHa
         break
       }
       case 'tool/result': {
-        const callId = event.data.message.content[0]?.toolCallId
-        if (callId !== undefined) pendingQuestions.delete(String(callId))
+        pendingQuestions.delete(String(event.data.message.content[0].toolCallId))
         const entry = agents.get(session.id)
         if (entry !== undefined) {
           entry.lastTool = undefined
@@ -424,6 +493,12 @@ export function createPetWindow(host: DshHost, options: PetWindowOptions): PetHa
     },
     hide() {
       if (petWindow !== null && !petWindow.isDestroyed()) petWindow.hide()
+    },
+    refresh() {
+      recompute()
+    },
+    setStyle(style) {
+      if (petWindow !== null && !petWindow.isDestroyed()) petWindow.webContents.send('pet:style', style)
     },
     destroy() {
       stopDragPolling()

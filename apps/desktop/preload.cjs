@@ -34,4 +34,12 @@ contextBridge.exposeInMainWorld('desktop', {
     ipcRenderer.on('window:pet-enabled-changed', listener)
     return () => ipcRenderer.removeListener('window:pet-enabled-changed', listener)
   },
+  getPetStyle() {
+    return ipcRenderer.invoke('window:pet-style')
+  },
+  onPetStyleChange(callback) {
+    const listener = (_event, style) => callback(style)
+    ipcRenderer.on('window:pet-style-changed', listener)
+    return () => ipcRenderer.removeListener('window:pet-style-changed', listener)
+  },
 })

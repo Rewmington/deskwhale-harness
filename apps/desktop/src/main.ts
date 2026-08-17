@@ -16,7 +16,15 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startDshWeb, type DshHost } from './host.js'
-import { createPetWindow, isPetEnabled, setPetEnabled, type PetHandle } from './pet.js'
+import {
+  createPetWindow,
+  getPetStyle,
+  isPetEnabled,
+  setPetEnabled,
+  setPetStyle,
+  type PetHandle,
+  type PetStyle,
+} from './pet.js'
 import { createTray, type TrayHandle } from './tray.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -59,16 +67,21 @@ let hostDisposed = false
 /** Height of the injected desktop title bar; must match the body top padding. */
 const TITLEBAR_HEIGHT = 40
 
-/** Pet model thumbnail, inlined so the title bar button works from the HTTP UI. */
-const PET_THUMBNAIL_DATA_URL = ((): string => {
+/** Load a pet thumbnail for the injected title-bar button without an HTTP request. */
+function petThumbnailDataUrl(path: string): string {
   try {
-    const bytes = readFileSync(join(__dirname, '../assets/pet/idle.png'))
+    const bytes = readFileSync(join(__dirname, path))
     return `data:image/png;base64,${bytes.toString('base64')}`
   } catch {
-    // Missing pet art must never block the shell; the button falls back to empty.
     return ''
   }
-})()
+}
+
+/** Inlined thumbnails indexed by the persisted desktop-pet outfit. */
+const PET_THUMBNAIL_DATA_URLS: Record<PetStyle, string> = {
+  classic: petThumbnailDataUrl('../assets/pet/idle.png'),
+  'black-white-maid': petThumbnailDataUrl('../assets/pet/black-white-maid/final-idle.png'),
+}
 
 const TITLEBAR_CSS = `
   html, body { background: transparent !important; }
@@ -143,6 +156,7 @@ const TITLEBAR_SCRIPT = `
   if (document.getElementById('dsh-desktop-titlebar') !== null) return
   const desktop = window.desktop
   if (desktop === undefined) return
+  const petThumbnails = ${JSON.stringify(PET_THUMBNAIL_DATA_URLS)}
   const svg = {
     min: '<svg viewBox="0 0 16 16"><path d="M2 7.5h12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
     max: '<svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
@@ -156,7 +170,7 @@ const TITLEBAR_SCRIPT = `
     '<span class="dsh-titlebar-label">DeepSeek Harness</span>' +
     '<div class="dsh-titlebar-controls">' +
       '<button class="dsh-titlebar-control pet-off" id="dsh-titlebar-pet" title="显示桌宠" aria-label="显示桌宠" aria-pressed="false">' +
-        '<img class="dsh-titlebar-pet-icon" src="${PET_THUMBNAIL_DATA_URL}" alt="" draggable="false">' +
+        '<img class="dsh-titlebar-pet-icon" src="${PET_THUMBNAIL_DATA_URLS.classic}" alt="" draggable="false">' +
       '</button>' +
       '<button class="dsh-titlebar-control" id="dsh-titlebar-min" title="最小化" aria-label="最小化">' + svg.min + '</button>' +
       '<button class="dsh-titlebar-control" id="dsh-titlebar-max" title="最大化" aria-label="最大化">' +
@@ -167,6 +181,7 @@ const TITLEBAR_SCRIPT = `
     '</div>'
   document.body.appendChild(bar)
   const petButton = document.getElementById('dsh-titlebar-pet')
+  const petIcon = petButton.querySelector('.dsh-titlebar-pet-icon')
   const setPetState = (enabled) => {
     petButton.classList.toggle('pet-on', enabled)
     petButton.classList.toggle('pet-off', !enabled)
@@ -174,9 +189,14 @@ const TITLEBAR_SCRIPT = `
     petButton.setAttribute('aria-label', enabled ? '隐藏桌宠' : '显示桌宠')
     petButton.setAttribute('aria-pressed', enabled ? 'true' : 'false')
   }
+  const setPetStyle = (style) => {
+    petIcon.src = petThumbnails[style] || petThumbnails.classic
+  }
   petButton.addEventListener('click', () => desktop.togglePet())
   if (typeof desktop.isPetEnabled === 'function') desktop.isPetEnabled().then(setPetState)
   if (typeof desktop.onPetEnabledChange === 'function') desktop.onPetEnabledChange(setPetState)
+  if (typeof desktop.getPetStyle === 'function') desktop.getPetStyle().then(setPetStyle)
+  if (typeof desktop.onPetStyleChange === 'function') desktop.onPetStyleChange(setPetStyle)
   document.getElementById('dsh-titlebar-min').addEventListener('click', () => desktop.minimize())
   document.getElementById('dsh-titlebar-max').addEventListener('click', () => desktop.toggleMaximize())
   document.getElementById('dsh-titlebar-close').addEventListener('click', () => desktop.close())
@@ -237,7 +257,9 @@ function createSplashWindow(): BrowserWindow {
   })
   win.center()
   void win.loadFile(join(__dirname, '../assets/splash.html'))
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    win.show()
+  })
   return win
 }
 
@@ -265,20 +287,27 @@ function createMainWindow(port: number): BrowserWindow {
   })
 
   // Frameless window controls, wired from the injected title bar.
-  ipcMain.on('window:minimize', () => win.minimize())
+  ipcMain.on('window:minimize', () => {
+    win.minimize()
+  })
   ipcMain.on('window:toggle-maximize', () => {
     if (win.isMaximized()) win.unmaximize()
     else win.maximize()
   })
-  ipcMain.on('window:close', () => win.close())
+  ipcMain.on('window:close', () => {
+    win.close()
+  })
   ipcMain.handle('window:is-maximized', () => win.isMaximized())
   const sendMaximized = (): void => {
     if (!win.isDestroyed()) win.webContents.send('window:maximized-changed', win.isMaximized())
   }
   win.on('maximize', sendMaximized)
   win.on('unmaximize', sendMaximized)
-  ipcMain.on('window:toggle-pet', () => togglePet(!isPetEnabled()))
+  ipcMain.on('window:toggle-pet', () => {
+    togglePet(!isPetEnabled())
+  })
   ipcMain.handle('window:pet-enabled', () => isPetEnabled())
+  ipcMain.handle('window:pet-style', () => getPetStyle())
 
   // The trust fence rejects any origin that is not loopback-same-origin, so
   // everything must stay on http://127.0.0.1:<port>. Open anything else in the
@@ -311,6 +340,7 @@ function createMainWindow(port: number): BrowserWindow {
     ipcMain.removeAllListeners('window:toggle-pet')
     ipcMain.removeHandler('window:is-maximized')
     ipcMain.removeHandler('window:pet-enabled')
+    ipcMain.removeHandler('window:pet-style')
     if (mainWindow === win) mainWindow = null
   })
 
@@ -328,7 +358,16 @@ function createPet(host: DshHost): void {
       app.quit()
     },
     togglePet,
+    selectPetStyle,
+    getPetStyle,
   })
+}
+
+/** Save a desktop-pet style and immediately apply it to an open pet window. */
+function selectPetStyle(style: PetStyle): void {
+  setPetStyle(style)
+  pet?.setStyle(style)
+  mainWindow?.webContents.send('window:pet-style-changed', style)
 }
 
 /** Turn the desktop pet on/off: persist the choice and show/hide the window.
@@ -373,7 +412,7 @@ async function bootstrap(): Promise<void> {
   tray = createTray(() => mainWindow, () => {
     isQuitting = true
     app.quit()
-  }, togglePet, isPetEnabled)
+  }, togglePet, isPetEnabled, getPetStyle, selectPetStyle)
   if (isPetEnabled()) createPet(host)
 
   // Let the SPA show system notification banners; deny everything else.
