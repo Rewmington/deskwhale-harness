@@ -7,7 +7,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "url": "git+https://github.com/Rewmington/deskwhale-harness.git",
     "directory": "packages/bundle/base"
   },
   "type": "module",
